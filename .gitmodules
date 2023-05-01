@@ -1,0 +1,9 @@
+[submodule "sam-slr-data-prepare"]
+	path = sam-slr-data-prepare
+	url = https://github.com/yuhan-zheng0121/sam-slr-data-prepare.git
+[submodule "WLASL"]
+	path = WLASL
+	url = https://github.com/yuhan-zheng0121/WLASL.git
+[submodule "SAM-SLR"]
+	path = SAM-SLR
+	url = https://github.com/yuhan-zheng0121/CVPR21Chal-SLR.git
