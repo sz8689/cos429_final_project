@@ -1,16 +1,74 @@
-import torch
-import torchvision
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader, Dataset
-import os
 import cv2
-import numpy as np
+import torchvision.transforms as transforms
+import torch
+from torchvision.transforms import Compose, Lambda
+import os
 from sklearn.model_selection import train_test_split
-from torchvision.models import ResNet18_Weights
+from torch.utils.data import DataLoader, Dataset
+from pytorchvideo.transforms import (
+    ApplyTransformToKey,
+    ShortSideScale,
+    UniformTemporalSubsample,
+    UniformCropVideo
+) 
+from torchvision.transforms._transforms_video import (
+    CenterCropVideo,
+    NormalizeVideo,
+)
+
+class PackPathway(torch.nn.Module):
+    """
+    Transform for converting video frames as a list of tensors. 
+    """
+    def __init__(self):
+        super().__init__()
+        
+    def forward(self, frames: torch.Tensor):
+        fast_pathway = frames
+        # Perform temporal sampling from the fast pathway.
+        slow_pathway = torch.index_select(
+            frames,
+            1,
+            torch.linspace(
+                0, frames.shape[1] - 1, frames.shape[1] // slowfast_alpha
+            ).long(),
+        )
+        frame_list = [slow_pathway, fast_pathway]
+        return frame_list
+
+# set up 
+side_size = 224
+mean = [0.45, 0.45, 0.45]
+std = [0.225, 0.225, 0.225]
+crop_size = 224
+num_frames = 32
+slowfast_alpha = 4
+num_clips = 10
+num_crops = 3
+
+frame_transform = transforms.Compose([
+    transforms.ToTensor()
+])
+
+video_transform = transforms.Compose([
+    UniformTemporalSubsample(num_frames),
+    ShortSideScale( 
+        size=side_size
+    ),
+    CenterCropVideo(crop_size),
+    Lambda(lambda x: x/255.0), # normalization
+    NormalizeVideo(mean, std),
+    PackPathway()
+]) 
 
 class VideoDataset(Dataset):
     def __init__(self, data_dir, split="train", test_size=0.1, val_size=0.1, random_state=429):
-        self.labels = os.listdir(data_dir)
+        exclude_dir_name = ['train', 'test', 'validation'] # exclude these directories
+        self.labels = [label for label in os.listdir('../WLASL/start_kit/videos') if label not in exclude_dir_name]
+        
+        # self.labels.remove('.DS_Store')
+        # self.labels.remove('.ipynb_checkpoints') # remove unncessary labels
+        
         self.label_to_idx = {label: idx for idx, label in enumerate(self.labels)}
         self.data = []
         for label in self.labels:
@@ -34,39 +92,24 @@ class VideoDataset(Dataset):
 
     def __getitem__(self, idx):
         video_path, label = self.data[idx]
+
         # process video to each frame
         video = cv2.VideoCapture(video_path)
-        frames = []
+        video_data = []
         while True:
             ret, frame = video.read()
             if not ret:
                 break
+
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            # resize the frame
-            frame = cv2.resize(frame, (224, 224))
-            frame = transforms.ToTensor()(frame)
-            frames.append(frame)
+            video_data.append(frame_transform(frame))
         video.release()
         
-        print(frames)
-#         # Pad or crop the frames to a fixed size
-#         num_frames = len(frames)
-#         if num_frames < 16:
-#             # Pad the frames with zeros
-#             pad_frames = [torch.zeros((3, size, size)) for i in range(16 - num_frames)]
-#             frames = frames + pad_frames
-#         elif num_frames > 16:
-#             # Crop the frames to the first 16 frames
-#             frames = frames[:16]
-
-        # Stack the frames into a single tensor
-        # frames = torch.stack(frames)
-        # video_tensor = torch.tensor(frames, dtype=torch.float32)
-        # video_tensor = video_tensor.permute(3, 0, 1, 2)
-        video_tensor = torch.stack(frames)
-        # video_tensor size: [num_frames, num channel, 224, 244]
-        # video_tensor = video_tensor.view(-1, 3, 224, 224)
-        # print(f"getitem: {video_tensor.shape}")
+        # transform the video
+        video_tensor = torch.stack(video_data).float()
+        video_tensor = video_tensor.permute(1, 0, 2, 3)
+        video_tensor = video_transform(video_tensor)
+        
         label_idx = self.label_to_idx[label]
         return video_tensor, label_idx
 
@@ -80,9 +123,10 @@ val_loader = DataLoader(val_data, batch_size=4, shuffle=True)
 test_data = VideoDataset(video_dir, split="test")
 test_loader = DataLoader(test_data, batch_size=4, shuffle=True)
 
-model = torchvision.models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
-num_ftrs = model.fc.in_features
-model.fc = torch.nn.Linear(num_ftrs, len(train_data.labels))
+model = torch.hub.load('facebookresearch/pytorchvideo', 'slowfast_r50', pretrained=True)
+model.blocks[6].proj = torch.nn.Linear(2304, 10, bias=True) # modify the last layer and train it again
+# num_ftrs = model.fc.in_features
+# model.fc = torch.nn.Linear(num_ftrs, len(train_data.labels))
 
 criterion = torch.nn.CrossEntropyLoss()
 
@@ -92,19 +136,16 @@ optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
 best_val_acc = 0
 for epoch in range(num_epochs):
+    print('current epoch: %d' % (epoch))
     running_loss = 0.0
     for i, data in enumerate(train_loader, 0):
         # get the inputs and labels from the data loader
         inputs, labels = data
-        # problem is in here, the expected dimension is [batch_size, num_channel, height, width]
-        # now input is [4, 16, 3, 224, 224] -> how to conver it to [4, 3, 224, 224]?
-        inputs = inputs.view(-1, 3, 224, 224)
 
         # zero the parameter gradients
         optimizer.zero_grad()
 
         # forward + backward + optimize
-        # print(f"epoch: {inputs.shape}")
         outputs = model(inputs)
         loss = criterion(outputs, labels)
         loss.backward()
@@ -112,18 +153,20 @@ for epoch in range(num_epochs):
 
         # print statistics
         running_loss += loss.item()
-        if i % 100 == 99:    # print every 100 mini-batches
+        if i % 10 == 0:    # print every 10 mini-batches
             print('[%d, %5d] loss: %.3f' %
-                  (epoch + 1, i + 1, running_loss / 100))
+                  (epoch, i, running_loss / 100))
             running_loss = 0.0
+        # elif i % 10 == 0:
+        #     print('finish %dth minibatches' % (i))
 
     # validate the model
     correct = 0
     total = 0
     with torch.no_grad():
         for data in val_loader:
-            images, labels = data
-            outputs = model(images)
+            videos, labels = data
+            outputs = model(videos)
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
@@ -145,8 +188,8 @@ correct = 0
 total = 0
 with torch.no_grad():
     for data in test_loader:
-        images, labels = data
-        outputs = model(images)
+        videos, labels = data
+        outputs = model(videos)
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
