@@ -1,7 +1,8 @@
 import cv2
 import torchvision.transforms as transforms
 import torch
-from torchvision.transforms import Compose, Lambda
+from torchvision.transforms import Compose, Lambda, RandomCrop
+from torch.optim.lr_scheduler import StepLR
 import os
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
@@ -15,6 +16,7 @@ from torchvision.transforms._transforms_video import (
     CenterCropVideo,
     NormalizeVideo,
 )
+import matplotlib.pyplot as plt
 
 ## CHANGE best_model name every time before running the script
 
@@ -39,7 +41,7 @@ class PackPathway(torch.nn.Module):
         return frame_list
 
 # set up 
-side_size = 224
+side_size = 256
 mean = [0.45, 0.45, 0.45]
 std = [0.225, 0.225, 0.225]
 crop_size = 224
@@ -57,7 +59,8 @@ video_transform = transforms.Compose([
     ShortSideScale( 
         size=side_size
     ),
-    CenterCropVideo(crop_size),
+    # CenterCropVideo(crop_size),
+    RandomCrop(crop_size),
     Lambda(lambda x: x/255.0), # normalization
     NormalizeVideo(mean, std),
     PackPathway()
@@ -138,10 +141,13 @@ model = model.to(device)
 criterion = torch.nn.CrossEntropyLoss()
 
 # Train the model
-num_epochs = 10
+num_epochs = 40
 optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+# Define the learning rate schedule
+lr_scheduler = StepLR(optimizer, step_size=10, gamma=0.1)
 
 best_val_acc = 0
+loss_history = []
 for epoch in range(num_epochs):
     print('current epoch: %d' % (epoch))
     running_loss = 0.0
@@ -166,13 +172,17 @@ for epoch in range(num_epochs):
 
         # print statistics
         running_loss += loss.item()
-        if i % 10 == 0:    # print every 10 mini-batches
+        if i % 10 == 9:    # print every 10 mini-batches
             print('[%d, %5d] loss: %.3f' %
-                  (epoch, i, running_loss / 100))
+                  (epoch, i, running_loss / 10))
+            loss_history.append(running_loss/10)
             running_loss = 0.0
         # elif i % 10 == 0:
         #     print('finish %dth minibatches' % (i))
 
+    # update learning rate
+    lr_scheduler.step()
+    
     # validate the model
     correct = 0
     total = 0
@@ -193,11 +203,18 @@ for epoch in range(num_epochs):
     # save the best model checkpoint
     if val_acc > best_val_acc:
         best_val_acc = val_acc
-        torch.save(model.state_dict(), "best_model_gpu_2.pth")
-            
+        torch.save(model.state_dict(), "best_model_gpu_zsy.pth")
+
+# Plot the loss history and save it to a file
+plt.plot(loss_history)
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Training Loss')
+plt.savefig('training_loss_40.png')
+
 # Load the saved model
 print('Loading the best model')
-model.load_state_dict(torch.load("best_model_gpu_2.pth"))
+model.load_state_dict(torch.load("best_model_gpu_zsy.pth"))
 
 # Evaluate the model on the test set
 correct = 0
