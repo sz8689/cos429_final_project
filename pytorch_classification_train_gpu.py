@@ -17,6 +17,8 @@ from torchvision.transforms._transforms_video import (
     NormalizeVideo,
 )
 import matplotlib.pyplot as plt
+import pickle
+import json
 
 ## CHANGE best_model name every time before running the script
 
@@ -67,31 +69,23 @@ video_transform = transforms.Compose([
 ]) 
 
 class VideoDataset(Dataset):
-    def __init__(self, data_dir, split="train", test_size=0.1, val_size=0.1, random_state=418):
+    def __init__(self, data_dir, split="train"):
         exclude_dir_name = ['train', 'test', 'validation'] # exclude these directories
-        self.labels = [label for label in os.listdir('../WLASL/start_kit/videos') if label not in exclude_dir_name]
+        # self.labels = [label for label in os.listdir('../WLASL/start_kit/videos') if label not in exclude_dir_name]
         
-        # self.labels.remove('.DS_Store')
-        # self.labels.remove('.ipynb_checkpoints') # remove unncessary labels
+        with open('../WLASL/start_kit/key_points_feature/top_40_{}_label.pkl'.format(split), 'rb') as f:
+            sample_names, labels = pickle.load(f)
+
+        with open('../WLASL/start_kit/key_points_feature/top_40_label_to_index.json') as f:
+            self.label_map = json.load(f)
+        label_map_r = {v: k for k, v in self.label_map.items()}
         
-        self.label_to_idx = {label: idx for idx, label in enumerate(self.labels)}
         self.data = []
-        for label in self.labels:
-            label_dir = os.path.join(data_dir, label)
-            video_files = os.listdir(label_dir)
-            video_paths = [os.path.join(label_dir, video_file) for video_file in video_files]
-
-            train_val_paths, test_paths = train_test_split(video_paths, test_size=test_size, random_state=random_state)
-            train_paths, val_paths = train_test_split(train_val_paths, test_size=val_size/(1-test_size), random_state=random_state)
-
-            # each label will have 80% go to training, 10% go to validation, and 10% go to test
-            if split == "train":
-                self.data += [(video_path, label) for video_path in train_paths]
-            elif split == "val":
-                self.data += [(video_path, label) for video_path in val_paths]
-            elif split == "test":
-                self.data += [(video_path, label) for video_path in test_paths]
-
+        for i, label in enumerate(labels):
+            label_dir = os.path.join(video_dir, label_map_r[label])
+            video_path = os.path.join(label_dir, sample_names[i] + ".mp4")
+            self.data.append((video_path, label_map_r[label]))
+        
     def __len__(self):
         return len(self.data)
 
@@ -115,18 +109,19 @@ class VideoDataset(Dataset):
         video_tensor = video_tensor.permute(1, 0, 2, 3)
         video_tensor = video_transform(video_tensor)
         
-        label_idx = self.label_to_idx[label]
+        # label_idx = self.label_to_idx[label]
+        label_idx = self.label_map[label]
         return video_tensor, label_idx
 
 video_dir = '../WLASL/start_kit/videos'
 train_data = VideoDataset(video_dir, split="train")
-train_loader = DataLoader(train_data, batch_size=4, shuffle=True)
+train_loader = DataLoader(train_data, batch_size=16, shuffle=True)
 
 val_data = VideoDataset(video_dir, split="val")
-val_loader = DataLoader(val_data, batch_size=4, shuffle=True)
+val_loader = DataLoader(val_data, batch_size=16, shuffle=True)
 
 test_data = VideoDataset(video_dir, split="test")
-test_loader = DataLoader(test_data, batch_size=4, shuffle=True)
+test_loader = DataLoader(test_data, batch_size=16, shuffle=True)
 
 model = torch.hub.load('facebookresearch/pytorchvideo', 'slowfast_r50', pretrained=True)
 model.blocks[6].proj = torch.nn.Linear(2304, 40, bias=True) # modify the last layer and train it again
@@ -141,15 +136,16 @@ model = model.to(device)
 criterion = torch.nn.CrossEntropyLoss()
 
 # Train the model
-num_epochs = 40
-optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+num_epochs = 60
+# optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 # Define the learning rate schedule
 lr_scheduler = StepLR(optimizer, step_size=10, gamma=0.1)
 
 best_val_acc = 0
 loss_history = []
 for epoch in range(num_epochs):
-    print('current epoch: %d' % (epoch))
+    print('current epoch: %d' % (epoch + 1))
     running_loss = 0.0
     for i, data in enumerate(train_loader, 0):
         # get the inputs and labels from the data loader
@@ -174,11 +170,9 @@ for epoch in range(num_epochs):
         running_loss += loss.item()
         if i % 10 == 9:    # print every 10 mini-batches
             print('[%d, %5d] loss: %.3f' %
-                  (epoch, i, running_loss / 10))
+                  (epoch + 1, i + 1, running_loss / 10))
             loss_history.append(running_loss/10)
             running_loss = 0.0
-        # elif i % 10 == 0:
-        #     print('finish %dth minibatches' % (i))
 
     # update learning rate
     lr_scheduler.step()
@@ -203,18 +197,18 @@ for epoch in range(num_epochs):
     # save the best model checkpoint
     if val_acc > best_val_acc:
         best_val_acc = val_acc
-        torch.save(model.state_dict(), "best_model_gpu_zsy.pth")
+        torch.save(model.state_dict(), "best_model_gpu40_batch16_Adam_ep60_split.pth")
 
 # Plot the loss history and save it to a file
 plt.plot(loss_history)
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
 plt.title('Training Loss')
-plt.savefig('training_loss_40.png')
+plt.savefig('training_loss_gpu40_batch16_Adam_ep60_split.png')
 
 # Load the saved model
 print('Loading the best model')
-model.load_state_dict(torch.load("best_model_gpu_zsy.pth"))
+model.load_state_dict(torch.load("best_model_gpu40_batch16_Adam_ep60_split.pth"))
 
 # Evaluate the model on the test set
 correct = 0

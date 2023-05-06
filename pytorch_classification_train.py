@@ -17,6 +17,8 @@ from torchvision.transforms._transforms_video import (
     NormalizeVideo,
 )
 import matplotlib.pyplot as plt
+import pickle
+import json
 
 class PackPathway(torch.nn.Module):
     """
@@ -65,30 +67,22 @@ video_transform = transforms.Compose([
 ]) 
 
 class VideoDataset(Dataset):
-    def __init__(self, data_dir, split="train", test_size=0.1, val_size=0.1, random_state=429):
+    def __init__(self, data_dir, split="train"):
         exclude_dir_name = ['train', 'test', 'validation'] # exclude these directories
-        self.labels = [label for label in os.listdir('../WLASL/start_kit/videos') if label not in exclude_dir_name]
+        # self.labels = [label for label in os.listdir('../WLASL/start_kit/videos') if label not in exclude_dir_name]
         
-        # self.labels.remove('.DS_Store')
-        # self.labels.remove('.ipynb_checkpoints') # remove unncessary labels
+        with open('../WLASL/start_kit/key_points_feature/top_10_{}_label.pkl'.format(split), 'rb') as f:
+            sample_names, labels = pickle.load(f)
+
+        with open('../WLASL/start_kit/key_points_feature/top_10_label_to_index.json') as f:
+            self.label_map = json.load(f)
+        label_map_r = {v: k for k, v in self.label_map.items()}
         
-        self.label_to_idx = {label: idx for idx, label in enumerate(self.labels)}
         self.data = []
-        for label in self.labels:
-            label_dir = os.path.join(data_dir, label)
-            video_files = os.listdir(label_dir)
-            video_paths = [os.path.join(label_dir, video_file) for video_file in video_files]
-
-            train_val_paths, test_paths = train_test_split(video_paths, test_size=test_size, random_state=random_state)
-            train_paths, val_paths = train_test_split(train_val_paths, test_size=val_size/(1-test_size), random_state=random_state)
-
-            # each label will have 80% go to training, 10% go to validation, and 10% go to test
-            if split == "train":
-                self.data += [(video_path, label) for video_path in train_paths]
-            elif split == "val":
-                self.data += [(video_path, label) for video_path in val_paths]
-            elif split == "test":
-                self.data += [(video_path, label) for video_path in test_paths]
+        for i, label in enumerate(labels):
+            label_dir = os.path.join(video_dir, label_map_r[label])
+            video_path = os.path.join(label_dir, sample_names[i] + ".mp4")
+            self.data.append((video_path, label_map_r[label]))
 
     def __len__(self):
         return len(self.data)
@@ -113,7 +107,8 @@ class VideoDataset(Dataset):
         video_tensor = video_tensor.permute(1, 0, 2, 3)
         video_tensor = video_transform(video_tensor)
         
-        label_idx = self.label_to_idx[label]
+        # label_idx = self.label_to_idx[label]
+        label_idx = self.label_map[label]
         return video_tensor, label_idx
 
 video_dir = '../WLASL/start_kit/videos'
@@ -139,7 +134,7 @@ model = model.to(device)
 criterion = torch.nn.CrossEntropyLoss()
 
 # Train the model
-num_epochs = 4
+num_epochs = 15
 optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 # Define the learning rate schedule
 lr_scheduler = StepLR(optimizer, step_size=10, gamma=0.1)
