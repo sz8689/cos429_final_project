@@ -80,7 +80,7 @@ class VideoDataset(Dataset):
         
         self.data = []
         for i, label in enumerate(labels):
-            label_dir = os.path.join(video_dir, label_map_r[label])
+            label_dir = os.path.join(data_dir, label_map_r[label])
             video_path = os.path.join(label_dir, sample_names[i] + ".mp4")
             self.data.append((video_path, label_map_r[label]))
 
@@ -111,108 +111,109 @@ class VideoDataset(Dataset):
         label_idx = self.label_map[label]
         return video_tensor, label_idx
 
-video_dir = '../WLASL/start_kit/videos'
-train_data = VideoDataset(video_dir, split="train")
-train_loader = DataLoader(train_data, batch_size=4, shuffle=True)
+def train_model():
+    video_dir = '../WLASL/start_kit/videos'
+    train_data = VideoDataset(video_dir, split="train")
+    train_loader = DataLoader(train_data, batch_size=4, shuffle=True)
 
-val_data = VideoDataset(video_dir, split="val")
-val_loader = DataLoader(val_data, batch_size=4, shuffle=True)
+    val_data = VideoDataset(video_dir, split="val")
+    val_loader = DataLoader(val_data, batch_size=4, shuffle=True)
 
-test_data = VideoDataset(video_dir, split="test")
-test_loader = DataLoader(test_data, batch_size=4, shuffle=True)
+    test_data = VideoDataset(video_dir, split="test")
+    test_loader = DataLoader(test_data, batch_size=4, shuffle=True)
 
-model = torch.hub.load('facebookresearch/pytorchvideo', 'slowfast_r50', pretrained=True)
-model.blocks[6].proj = torch.nn.Linear(2304, 10, bias=True) # modify the last layer and train it again
+    model = torch.hub.load('facebookresearch/pytorchvideo', 'slowfast_r50', pretrained=True)
+    model.blocks[6].proj = torch.nn.Linear(2304, 10, bias=True) # modify the last layer and train it again
 
-# Set to GPU or CPU
-device = "cpu"
-model = model.eval()
-model = model.to(device)
-# num_ftrs = model.fc.in_features
-# model.fc = torch.nn.Linear(num_ftrs, len(train_data.labels))
+    # Set to GPU or CPU
+    device = "cpu"
+    model = model.eval()
+    model = model.to(device)
+    # num_ftrs = model.fc.in_features
+    # model.fc = torch.nn.Linear(num_ftrs, len(train_data.labels))
 
-criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss()
 
-# Train the model
-num_epochs = 15
-optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-# Define the learning rate schedule
-lr_scheduler = StepLR(optimizer, step_size=10, gamma=0.1)
+    # Train the model
+    num_epochs = 15
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    # Define the learning rate schedule
+    lr_scheduler = StepLR(optimizer, step_size=10, gamma=0.1)
 
-best_val_acc = 0
-loss_history = []
-for epoch in range(num_epochs):
-    print('current epoch: %d' % (epoch))
-    running_loss = 0.0
-    
-    for i, data in enumerate(train_loader, 0):
-        # get the inputs and labels from the data loader
-        inputs, labels = data
-        # for i in range(len(inputs)):
-        #     print(inputs[i].shape)
+    best_val_acc = 0
+    loss_history = []
+    for epoch in range(num_epochs):
+        print('current epoch: %d' % (epoch))
+        running_loss = 0.0
 
-        # zero the parameter gradients
-        optimizer.zero_grad()
+        for i, data in enumerate(train_loader, 0):
+            # get the inputs and labels from the data loader
+            inputs, labels = data
+            # for i in range(len(inputs)):
+            #     print(inputs[i].shape)
 
-        # forward + backward + optimize
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
+            # zero the parameter gradients
+            optimizer.zero_grad()
 
-        # print statistics
-        running_loss += loss.item()
-        if i % 10 == 9:    # print every 10 mini-batches
-            print('[%d, %5d] loss: %.3f' %
-                  (epoch, i, running_loss / 10))
-            loss_history.append(running_loss/10)
-            running_loss = 0.0
-        # elif i % 10 == 0:
-        #     print('finish %dth minibatches' % (i))
-    
-    # update learning rate
-    lr_scheduler.step()
+            # forward + backward + optimize
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
 
-    # validate the model
+            # print statistics
+            running_loss += loss.item()
+            if i % 10 == 9:    # print every 10 mini-batches
+                print('[%d, %5d] loss: %.3f' %
+                      (epoch, i, running_loss / 10))
+                loss_history.append(running_loss/10)
+                running_loss = 0.0
+            # elif i % 10 == 0:
+            #     print('finish %dth minibatches' % (i))
+
+        # update learning rate
+        lr_scheduler.step()
+
+        # validate the model
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for data in val_loader:
+                videos, labels = data
+                outputs = model(videos)
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+
+        val_acc = 100 * correct / total
+        print('Validation accuracy: %d %%' % (val_acc))
+
+        # save the best model checkpoint
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save(model.state_dict(), "best_model.pth")
+
+    # Plot the loss history and save it to a file
+    plt.plot(loss_history)
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training Loss')
+    plt.savefig('training_loss_40.png')
+
+    # Load the saved model
+    print('Loading the best model')
+    model.load_state_dict(torch.load("best_model.pth"))
+
+    # Evaluate the model on the test set
     correct = 0
     total = 0
     with torch.no_grad():
-        for data in val_loader:
+        for data in test_loader:
             videos, labels = data
             outputs = model(videos)
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
-    val_acc = 100 * correct / total
-    print('Validation accuracy: %d %%' % (val_acc))
-
-    # save the best model checkpoint
-    if val_acc > best_val_acc:
-        best_val_acc = val_acc
-        torch.save(model.state_dict(), "best_model.pth")
-
-# Plot the loss history and save it to a file
-plt.plot(loss_history)
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.title('Training Loss')
-plt.savefig('training_loss_40.png')
-            
-# Load the saved model
-print('Loading the best model')
-model.load_state_dict(torch.load("best_model.pth"))
-
-# Evaluate the model on the test set
-correct = 0
-total = 0
-with torch.no_grad():
-    for data in test_loader:
-        videos, labels = data
-        outputs = model(videos)
-        _, predicted = torch.max(outputs.data, 1)
-        total += labels.size(0)
-        correct += (predicted == labels).sum().item()
-
-print('Accuracy of the network on the test images: %d %%' % (
-    100 * correct / total))
+    print('Accuracy of the network on the test images: %d %%' % (
+        100 * correct / total))

@@ -123,163 +123,162 @@ class Feeder(Dataset):
 
         return [data_numpy_slow, data_numpy_fast], label, index
 
-def kp_model():
-    path = '/n/fs/scratch/yz7976/WLASL/start_kit/key_points_feature'
-    kp_type = 'joint_motion' # joint, joint_motion, bone, bone_motion
+# is_vector: false for joint
+path = '/n/fs/scratch/yz7976/WLASL/start_kit/key_points_feature'
+kp_type = 'joint_motion'
+train_feeder = Feeder(path+'/top_40_train_'+kp_type+'.npy', 
+                      path+'/top_40_train_label.pkl',
+                      debug=True,
+                      normalization=True,
+                      random_shift = True,
+                      is_vector=True)
+val_feeder = Feeder(path+'/top_40_val_'+kp_type+'.npy', 
+                    path+'/top_40_val_label.pkl',
+                      debug=True,
+                      normalization=True,
+                      random_shift = True,
+                      is_vector=True)
+test_feeder = Feeder(path+'/top_40_test_'+kp_type+'.npy', 
+                     path+'/top_40_test_label.pkl',
+                      debug=True,
+                      normalization=True,
+                      random_shift = True,
+                      is_vector=True)
+
+data_loader_train= torch.utils.data.DataLoader(
+                dataset=train_feeder,
+                batch_size=batch_size,
+                shuffle=True)
+data_loader_val= torch.utils.data.DataLoader(
+                dataset=val_feeder,
+                batch_size=batch_size,
+                shuffle=True)
+data_loader_test= torch.utils.data.DataLoader(
+                dataset=test_feeder,
+                batch_size=batch_size,
+                shuffle=True)
+
+
+# load slowfast model
+model = torch.hub.load('facebookresearch/pytorchvideo', 'slowfast_r50', pretrained=True)
+model.blocks[6].proj = torch.nn.Linear(model.blocks[6].proj.in_features, num_label, bias=True) # modify the last layer and train it again
+model.blocks[5].pool[0] = torch.nn.AvgPool3d(kernel_size=(8, 1, 1), stride=(1, 1, 1), padding=(0, 0, 0))
+model.blocks[5].pool[1] = torch.nn.AvgPool3d(kernel_size=(32, 1, 1), stride=(1, 1, 1), padding=(0, 0, 0))
+
+
+# Set to GPU or CPU
+device = "cuda"
+model = model.to(device)
+
+criterion = torch.nn.CrossEntropyLoss()
+
+# Train the model
+num_epochs = 15
+# optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
+# Define the learning rate schedule
+lr_scheduler = StepLR(optimizer, step_size=10, gamma=0.1)
+# optimizer = optim.SGD(model.parameters(), lr=0.0001, momentum=0.9)
+
+
+best_val_acc = 0
+train_acc_history = []
+val_acc_history = []
+loss_history = []
+for epoch in range(num_epochs):
+    print('current epoch: %d' % (epoch + 1))
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    model.train()
+    for i, (data, label, index) in enumerate(data_loader_train, 0):
+        data = [lbl.to(device) for lbl in data]
+        label = label.to(device)
+        # print(type(inputs), type(labels))
+        # print(type(inputs[0]), type(labels[0]))
+
+        # zero the parameter gradients
+        optimizer.zero_grad()
+
+        # forward + backward + optimize
+        outputs = model(data)
+        loss = criterion(outputs, label)
+        loss.backward()
+        optimizer.step()
+
+        _, predicted = torch.max(outputs.data, 1)
+        total += label.size(0)
+        correct += (predicted == label).sum().item()
+
+        # print statistics
+        running_loss += loss.item()
+        if i % 10 == 9:    # print every 10 mini-batches
+            print('[%d, %5d] loss: %.3f' %
+                  (epoch + 1, i + 1, running_loss / 10))
+            loss_history.append(running_loss/10)
+            running_loss = 0.0
+
+    train_acc = 100 * correct / total
+    print('Train accuracy: %d %%' % (train_acc))
+    train_acc_history.append(train_acc)
+
+    # update learning rate
+    lr_scheduler.step()
     
-    # is_vector: false only for joint!!!!!!
-    train_feeder = Feeder(path+'/top_40_train_'+kp_type+'.npy', 
-                        path+'/top_40_train_label.pkl',
-                        debug=True,
-                        normalization=True,
-                        random_shift = True,
-                        is_vector=True)
-    val_feeder = Feeder(path+'/top_40_val_'+kp_type+'.npy', 
-                        path+'/top_40_val_label.pkl',
-                        debug=True,
-                        normalization=True,
-                        random_shift = True,
-                        is_vector=True)
-    test_feeder = Feeder(path+'/top_40_test_'+kp_type+'.npy', 
-                        path+'/top_40_test_label.pkl',
-                        debug=True,
-                        normalization=True,
-                        random_shift = True,
-                        is_vector=True)
-    
-    data_loader_train= torch.utils.data.DataLoader(
-                    dataset=train_feeder,
-                    batch_size=batch_size,
-                    shuffle=True)
-    data_loader_val= torch.utils.data.DataLoader(
-                    dataset=val_feeder,
-                    batch_size=batch_size,
-                    shuffle=True)
-    data_loader_test= torch.utils.data.DataLoader(
-                    dataset=test_feeder,
-                    batch_size=batch_size,
-                    shuffle=True)
-    
-    
-    # load slowfast model
-    model = torch.hub.load('facebookresearch/pytorchvideo', 'slowfast_r50', pretrained=True)
-    model.blocks[5].pool[0] = torch.nn.AvgPool3d(kernel_size=(8, 1, 1), stride=(1, 1, 1), padding=(0, 0, 0))
-    model.blocks[5].pool[1] = torch.nn.AvgPool3d(kernel_size=(32, 1, 1), stride=(1, 1, 1), padding=(0, 0, 0))
-    
-    
-    # Set to GPU or CPU
-    device = "cuda"
-    model = model.to(device)
-    
-    criterion = torch.nn.CrossEntropyLoss()
-    
-    # Train the model
-    num_epochs = 15
-    # optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    # Define the learning rate schedule
-    lr_scheduler = StepLR(optimizer, step_size=10, gamma=0.1)
-    # optimizer = optim.SGD(model.parameters(), lr=0.0001, momentum=0.9)
-    
-    
-    best_val_acc = 0
-    train_acc_history = []
-    val_acc_history = []
-    loss_history = []
-    for epoch in range(num_epochs):
-        print('current epoch: %d' % (epoch + 1))
-        running_loss = 0.0
-        correct = 0
-        total = 0
-        model.train()
-        for i, (data, label, index) in enumerate(data_loader_train, 0):
-            data = [lbl.to(device) for lbl in data]
-            label = label.to(device)
-            # print(type(inputs), type(labels))
-            # print(type(inputs[0]), type(labels[0]))
-
-            # zero the parameter gradients
-            optimizer.zero_grad()
-
-            # forward + backward + optimize
-            outputs = model(data)
-            loss = criterion(outputs, label)
-            loss.backward()
-            optimizer.step()
-
-            _, predicted = torch.max(outputs.data, 1)
-            total += label.size(0)
-            correct += (predicted == label).sum().item()
-
-            # print statistics
-            running_loss += loss.item()
-            if i % 10 == 9:    # print every 10 mini-batches
-                print('[%d, %5d] loss: %.3f' %
-                    (epoch + 1, i + 1, running_loss / 10))
-                loss_history.append(running_loss/10)
-                running_loss = 0.0
-
-        train_acc = 100 * correct / total
-        print('Train accuracy: %d %%' % (train_acc))
-        train_acc_history.append(train_acc)
-
-        # update learning rate
-        lr_scheduler.step()
-        
-        # validate the model
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            model.eval()
-            for data, label, index in (data_loader_val):
-                data = [lbl.to(device) for lbl in data]
-                label = label.to(device)
-                outputs = model(data)
-                _, predicted = torch.max(outputs.data, 1)
-                total += label.size(0)
-                correct += (predicted == label).sum().item()
-
-        val_acc = 100 * correct / total
-        print('Validation accuracy: %d %%' % (val_acc))
-        val_acc_history.append(val_acc)
-
-        # save the best model checkpoint
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            torch.save(model.state_dict(), "kp_models/best_joint_motion_ep15_rs.pth")
-
-    # save data
-    with open("kp_models/training_loss_joint_motion_ep15_rs.txt", "w") as output:
-        output.write(str(loss_history))
-    with open("kp_models/train_acc_joint_motion_ep15_rs.txt", "w") as output:
-        output.write(str(train_acc_history))
-    with open("kp_models/val_acc_joint_motion_ep15_rs.txt", "w") as output:
-        output.write(str(val_acc_history))
-
-    # Plot the loss history and save it to a file
-    plt.plot(loss_history)
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training Loss')
-    plt.savefig('kp_models/training_loss_joint_motion_ep15_rs.png')
-
-    # Load the saved model
-    print('Loading the best model')
-    model.load_state_dict(torch.load("kp_models/best_joint_motion_ep15_rs.pth"))
-
-    # Evaluate the model on the test set
+    # validate the model
     correct = 0
     total = 0
     with torch.no_grad():
         model.eval()
-        for data, label, index in (data_loader_test):
+        for data, label, index in (data_loader_val):
             data = [lbl.to(device) for lbl in data]
             label = label.to(device)
-
             outputs = model(data)
             _, predicted = torch.max(outputs.data, 1)
             total += label.size(0)
             correct += (predicted == label).sum().item()
 
-    print('Accuracy of the network on the test images: %d %%' % (
-        100 * correct / total))
+    val_acc = 100 * correct / total
+    print('Validation accuracy: %d %%' % (val_acc))
+    val_acc_history.append(val_acc)
+
+    # save the best model checkpoint
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        torch.save(model.state_dict(), "zsy_kp_models/best_joint_motion_ep15_rs.pth")
+
+# save data
+with open("zsy_kp_models/training_loss_joint_motion_ep15_rs.txt", "w") as output:
+    output.write(str(loss_history))
+with open("zsy_kp_models/train_acc_joint_motion_ep15_rs.txt", "w") as output:
+    output.write(str(train_acc_history))
+with open("zsy_kp_models/val_acc_joint_motion_ep15_rs.txt", "w") as output:
+    output.write(str(val_acc_history))
+
+# Plot the loss history and save it to a file
+plt.plot(loss_history)
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.title('Training Loss')
+plt.savefig('zsy_kp_models/training_loss_joint_motion_ep15_rs.png')
+
+# Load the saved model
+print('Loading the best model')
+model.load_state_dict(torch.load("zsy_kp_models/best_joint_motion_ep15_rs.pth"))
+
+# Evaluate the model on the test set
+correct = 0
+total = 0
+with torch.no_grad():
+    model.eval()
+    for data, label, index in (data_loader_test):
+        data = [lbl.to(device) for lbl in data]
+        label = label.to(device)
+
+        outputs = model(data)
+        _, predicted = torch.max(outputs.data, 1)
+        total += label.size(0)
+        correct += (predicted == label).sum().item()
+
+print('Accuracy of the network on the test images: %d %%' % (
+    100 * correct / total))

@@ -1,0 +1,92 @@
+(451,)
+(451, 3, 8, 27, 1)
+(451, 3, 32, 27, 1)
+(451,)
+69241
+(53,)
+(53, 3, 8, 27, 1)
+(53, 3, 32, 27, 1)
+(53,)
+68012
+(83,)
+(83, 3, 8, 27, 1)
+(83, 3, 32, 27, 1)
+(83,)
+07097
+current epoch: 1
+[1,    10] loss: 3.819
+[1,    20] loss: 3.749
+Train accuracy: 6 %
+Validation accuracy: 9 %
+current epoch: 2
+[2,    10] loss: 3.393
+[2,    20] loss: 3.524
+Train accuracy: 13 %
+Validation accuracy: 15 %
+current epoch: 3
+[3,    10] loss: 3.188
+[3,    20] loss: 3.122
+Train accuracy: 14 %
+Validation accuracy: 13 %
+current epoch: 4
+[4,    10] loss: 3.155
+[4,    20] loss: 3.204
+Train accuracy: 17 %
+Validation accuracy: 11 %
+current epoch: 5
+[5,    10] loss: 2.780
+[5,    20] loss: 2.931
+Train accuracy: 19 %
+Validation accuracy: 15 %
+current epoch: 6
+[6,    10] loss: 2.577
+[6,    20] loss: 2.741
+Train accuracy: 25 %
+Validation accuracy: 9 %
+current epoch: 7
+[7,    10] loss: 2.413
+[7,    20] loss: 2.361
+Train accuracy: 29 %
+Validation accuracy: 15 %
+current epoch: 8
+[8,    10] loss: 2.287
+[8,    20] loss: 2.336
+Train accuracy: 31 %
+Validation accuracy: 18 %
+current epoch: 9
+[9,    10] loss: 2.072
+[9,    20] loss: 2.025
+Train accuracy: 37 %
+Validation accuracy: 15 %
+current epoch: 10
+[10,    10] loss: 2.232
+[10,    20] loss: 1.756
+Train accuracy: 45 %
+Validation accuracy: 13 %
+current epoch: 11
+[11,    10] loss: 1.551
+[11,    20] loss: 1.398
+Train accuracy: 62 %
+Validation accuracy: 20 %
+current epoch: 12
+[12,    10] loss: 1.116
+[12,    20] loss: 1.197
+Train accuracy: 70 %
+Validation accuracy: 20 %
+current epoch: 13
+[13,    10] loss: 1.098
+[13,    20] loss: 0.988
+Train accuracy: 74 %
+Validation accuracy: 26 %
+current epoch: 14
+[14,    10] loss: 0.792
+[14,    20] loss: 0.939
+Train accuracy: 77 %
+Validation accuracy: 24 %
+current epoch: 15
+[15,    10] loss: 0.729
+[15,    20] loss: 0.768
+Train accuracy: 81 %
+Validation accuracy: 24 %
+Loading the best model
+Accuracy of the network on the test images: 20 %
